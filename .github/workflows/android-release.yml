@@ -1,0 +1,86 @@
+name: CB Bangladesh Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: Production server URL
+        required: true
+        default: https://ais-pre-4xl7h2rqb7wt2kw2pqspkq-157676141278.asia-southeast1.run.app
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No project ZIP file found."
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          ANDROID_DIR=$(find extracted -type f -name settings.gradle -o -name settings.gradle.kts | head -n 1 | xargs -r dirname)
+
+          if [ -z "$ANDROID_DIR" ]; then
+            echo "Android project was not found inside the ZIP."
+            exit 1
+          fi
+
+          echo "ANDROID_DIR=$ANDROID_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $ANDROID_DIR"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build APK and AAB
+        env:
+          SERVER_URL: ${{ inputs.server_url }}
+        run: |
+          cd "$ANDROID_DIR"
+
+          gradle --no-daemon clean assembleRelease bundleRelease \
+            -PSERVER_URL="$SERVER_URL"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CB-Bangladesh-APK
+          path: "**/build/outputs/apk/release/*.apk"
+          if-no-files-found: error
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: CB-Bangladesh-AAB
+          path: "**/build/outputs/bundle/release/*.aab"
+          if-no-files-found: error
